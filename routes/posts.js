@@ -3,79 +3,81 @@ const express = require('express');
 const router = express.Router();
 const db = require('../models');
 const commentsRoutes = require('./comments');
+
 router.use('/:postId/comments', commentsRoutes);
 
-// Rota para criar um novo post
-router.post('/', async (req, res) => {
+const STATUS_CODES = {
+    NOT_FOUND: 404,
+    INTERNAL_SERVER_ERROR: 500,
+    CREATED: 201,
+    OK: 200,
+    NO_CONTENT: 204
+};
+
+const ERROR_MESSAGES = {
+    POST_NOT_FOUND: 'Post not found',
+    INTERNAL_SERVER_ERROR: 'Internal server error'
+};
+
+// Middleware to check if a post exists
+async function checkPostExists(req, res, next) {
+    const { postId } = req.params;
+    const post = await db.Post.findByPk(postId);
+    if (!post) {
+        return res.status(STATUS_CODES.NOT_FOUND).json({ message: ERROR_MESSAGES.POST_NOT_FOUND });
+    }
+    req.post = post;
+    next();
+}
+
+// Middleware for error handling
+function errorHandler(error, req, res, next) {
+    console.error(error);
+    res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
+}
+
+router.post('/', async (req, res, next) => {
     try {
         const { title, content } = req.body;
         const post = await db.Post.create({ title, content });
-        res.status(201).json(post);
+        res.status(STATUS_CODES.CREATED).json(post);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        next(error);
     }
-});
+}, errorHandler);
 
-// Rota para obter todos os posts
-router.get('/', async (req, res) => {
+router.get('/', async (req, res, next) => {
     try {
         const posts = await db.Post.findAll();
-        res.json(posts);
+        res.status(STATUS_CODES.OK).json(posts);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        next(error);
     }
-});
+}, errorHandler);
 
-// Rota para obter um post específico
-router.get('/:postId', async (req, res) => {
-    try {
-        const { postId } = req.params;
-        const post = await db.Post.findByPk(postId);
-        if (!post) {
-            return res.status(404).json({ message: 'Post not found' });
-        }
-        res.json(post);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
-    }
-});
+router.get('/:postId', checkPostExists, (req, res) => {
+    res.status(STATUS_CODES.OK).json(req.post);
+}, errorHandler);
 
-// Rota para atualizar um post
-router.put('/:postId', async (req, res) => {
+router.put('/:postId', checkPostExists, async (req, res, next) => {
     try {
-        const { postId } = req.params;
         const { title, content } = req.body;
-        const post = await db.Post.findByPk(postId);
-        if (!post) {
-            return res.status(404).json({ message: 'Post not found' });
-        }
-        post.title = title;
-        post.content = content;
-        await post.save();
-        res.json(post);
+        req.post.title = title;
+        req.post.content = content;
+        await req.post.save();
+        res.status(STATUS_CODES.OK).json(req.post);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        next(error);
     }
-});
+}, errorHandler);
 
-// Rota para excluir um post
-router.delete('/:postId', async (req, res) => {
+router.delete('/:postId', checkPostExists, async (req, res, next) => {
     try {
-        const { postId } = req.params;
-        const post = await db.Post.findByPk(postId);
-        if (!post) {
-            return res.status(404).json({ message: 'Post not found' });
-        }
-        await post.destroy();
-        res.status(204).end();
+        await req.post.destroy();
+        res.status(STATUS_CODES.NO_CONTENT).end();
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        next(error);
     }
-});
+}, errorHandler);
 
 module.exports = router;
